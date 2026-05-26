@@ -5,6 +5,18 @@ public struct SearchDescriptor: Sendable {
     
     public init() {}
     
+    public init<V>(_ value: V) where V: SearchableValue {
+        self.add(value)
+    }
+    
+    public init<S>(_ searchable: S) where S: Searchable {
+        self.add(searchable)
+    }
+    
+    public init<S>(_ searchables: S) where S: Sequence, S.Element: Searchable {
+        self.add(searchables)
+    }
+    
     internal init(properties: [SearchableProperty]) {
         self.properties = properties
     }
