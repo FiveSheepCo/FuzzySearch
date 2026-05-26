@@ -108,6 +108,34 @@ var searchDescriptor: SearchDescriptor {
 
 Weights are relative. A field with `weight: 0.5` contributes less strongly than fields with the default `weight: 1.0`.
 
+Descriptors can also include nested `Searchable` values. Nested field weights are preserved and multiplied by the outer weight.
+
+```swift
+struct Address: Searchable {
+    let city: String
+    let country: String
+
+    var searchDescriptor: SearchDescriptor {
+        SearchDescriptor()
+            .add(city)
+            .add(country, weight: 0.5)
+    }
+}
+
+struct User: Searchable {
+    let firstName: String
+    let lastName: String
+    let address: Address
+
+    var searchDescriptor: SearchDescriptor {
+        SearchDescriptor()
+            .add(firstName)
+            .add(lastName)
+            .add(address, weight: 0.5)
+    }
+}
+```
+
 ## SearchIndex Actor
 
 For a reusable dataset, `SearchIndex` stores items behind an actor and exposes async search.

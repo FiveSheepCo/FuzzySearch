@@ -14,6 +14,30 @@ private struct User: Searchable, Sendable, Equatable {
     }
 }
 
+private struct Address: Searchable, Sendable, Equatable {
+    let city: String
+    let country: String
+    
+    var searchDescriptor: SearchDescriptor {
+        SearchDescriptor()
+            .add(city)
+            .add(country, weight: 0.5)
+    }
+}
+
+private struct NestedUser: Searchable, Sendable, Equatable {
+    let firstName: String
+    let lastName: String
+    let address: Address
+    
+    var searchDescriptor: SearchDescriptor {
+        SearchDescriptor()
+            .add(firstName)
+            .add(lastName)
+            .add(address, weight: 0.5)
+    }
+}
+
 @Test func singleSearchReturnsWeightedScore() async throws {
     let user = User(firstName: "Sarah", lastName: "Connor", address: "Los Angeles")
     
@@ -59,6 +83,25 @@ private struct User: Searchable, Sendable, Equatable {
     
     #expect(results.first?.item.lastName == "Connor")
     #expect((results.first?.score ?? 0) > 0.9)
+}
+
+@Test func searchCanMatchNestedSearchableProperties() async throws {
+    let users = [
+        NestedUser(
+            firstName: "Sarah",
+            lastName: "Connor",
+            address: Address(city: "Los Angeles", country: "United States")
+        ),
+        NestedUser(
+            firstName: "Sara",
+            lastName: "King",
+            address: Address(city: "London", country: "United Kingdom")
+        ),
+    ]
+    
+    let results = await Fuzzy().search(for: "United Kingdom", in: users)
+    
+    #expect(results.first?.item.lastName == "King")
 }
 
 @Test func searchToleratesTyposAndDiacritics() async throws {

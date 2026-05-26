@@ -16,4 +16,13 @@ public struct SearchDescriptor: Sendable {
         properties.append(property)
         return SearchDescriptor(properties: properties)
     }
+    
+    @discardableResult
+    public func add<S>(_ searchable: S, weight: Double = 1) -> SearchDescriptor where S: Searchable {
+        var properties = properties
+        properties.append(contentsOf: searchable.searchDescriptor.properties.map { property in
+            SearchableProperty(value: property.value, weight: property.weight * weight)
+        })
+        return SearchDescriptor(properties: properties)
+    }
 }
