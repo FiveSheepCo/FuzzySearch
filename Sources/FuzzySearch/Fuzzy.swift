@@ -31,10 +31,10 @@ public struct Fuzzy: Sendable {
         
         if collection.count < 256 {
             return rankedResults(
-                collection.lazy.compactMap { item in
+                collection.enumerated().lazy.compactMap { offset, item in
                     let score = score(item.searchDescriptor, query: string, preparedQuery: preparedQuery)
                     guard score >= minimumScore else { return nil }
-                    return SearchResult(item: item, score: score)
+                    return SearchResult(item: item, score: score, index: offset)
                 },
                 limit: limit
             )
@@ -48,10 +48,11 @@ public struct Fuzzy: Sendable {
             while lowerBound < items.count {
                 let upperBound = min(items.count, lowerBound + chunkSize)
                 let chunk = Array(items[lowerBound..<upperBound])
+                let chunkLowerBound = lowerBound
                 let algorithm = self.algorithm
                 
                 group.addTask {
-                    chunk.compactMap { item in
+                    chunk.enumerated().compactMap { offset, item in
                         let score: Double
                         if let preparedQuery, let preparingAlgorithm = algorithm as? any QueryPreparingSearchAlgorithm {
                             score = preparingAlgorithm.score(preparedQuery: preparedQuery, descriptor: item.searchDescriptor)
@@ -59,7 +60,7 @@ public struct Fuzzy: Sendable {
                             score = algorithm.score(query: string, descriptor: item.searchDescriptor)
                         }
                         guard score >= minimumScore else { return nil }
-                        return SearchResult(item: item, score: score)
+                        return SearchResult(item: item, score: score, index: chunkLowerBound + offset)
                     }
                 }
                 

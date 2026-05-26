@@ -75,10 +75,12 @@ Collection search returns `[SearchResult<Item>]`, sorted from highest score to l
 public struct SearchResult<Item>: Sendable where Item: Sendable {
     public let item: Item
     public let score: Double
+    public let index: Int?
 }
 ```
 
 Scores are normalized from `0.0` to `1.0`, where higher is better.
+For collection searches, `index` is the source collection offset for the matched item. Single-item searches return `nil`.
 
 You can limit result count or filter weak matches:
 

@@ -33,7 +33,20 @@ private struct User: Searchable, Sendable, Equatable {
     let results = await Fuzzy().search(for: "Sarah", in: users)
     
     #expect(results.map(\.item.firstName).prefix(2) == ["Sarah", "Sam"])
+    #expect(results.map(\.index).prefix(2) == [1, 0])
     #expect(results[0].score > results[1].score)
+}
+
+@Test func collectionSearchIncludesSourceIndicesForLargeCollections() async throws {
+    var users = (0..<300).map {
+        User(firstName: "User\($0)", lastName: "Example", address: "Bangkok")
+    }
+    users[275] = User(firstName: "Sarah", lastName: "Connor", address: "Los Angeles")
+    
+    let results = await Fuzzy().search(for: "Sarah", in: users)
+    
+    #expect(results.first?.item.firstName == "Sarah")
+    #expect(results.first?.index == 275)
 }
 
 @Test func collectionSearchCanMatchAcrossProperties() async throws {
