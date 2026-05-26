@@ -108,7 +108,7 @@ var searchDescriptor: SearchDescriptor {
 
 Weights are relative. A field with `weight: 0.5` contributes less strongly than fields with the default `weight: 1.0`.
 
-Descriptors can also include nested `Searchable` values. Nested field weights are preserved and multiplied by the outer weight.
+Descriptors can also include nested `Searchable` values, including arrays of searchable values. Nested field weights are preserved and multiplied by the outer weight.
 
 ```swift
 struct Address: Searchable {
@@ -125,13 +125,13 @@ struct Address: Searchable {
 struct User: Searchable {
     let firstName: String
     let lastName: String
-    let address: Address
+    let addresses: [Address]
 
     var searchDescriptor: SearchDescriptor {
         SearchDescriptor()
             .add(firstName)
             .add(lastName)
-            .add(address, weight: 0.5)
+            .add(addresses, weight: 0.5)
     }
 }
 ```

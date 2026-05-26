@@ -38,6 +38,19 @@ private struct NestedUser: Searchable, Sendable, Equatable {
     }
 }
 
+private struct MultiAddressUser: Searchable, Sendable, Equatable {
+    let firstName: String
+    let lastName: String
+    let addresses: [Address]
+    
+    var searchDescriptor: SearchDescriptor {
+        SearchDescriptor()
+            .add(firstName)
+            .add(lastName)
+            .add(addresses, weight: 0.5)
+    }
+}
+
 @Test func singleSearchReturnsWeightedScore() async throws {
     let user = User(firstName: "Sarah", lastName: "Connor", address: "Los Angeles")
     
@@ -100,6 +113,31 @@ private struct NestedUser: Searchable, Sendable, Equatable {
     ]
     
     let results = await Fuzzy().search(for: "United Kingdom", in: users)
+    
+    #expect(results.first?.item.lastName == "King")
+}
+
+@Test func searchCanMatchArraysOfNestedSearchableProperties() async throws {
+    let users = [
+        MultiAddressUser(
+            firstName: "Sarah",
+            lastName: "Connor",
+            addresses: [
+                Address(city: "Los Angeles", country: "United States"),
+                Address(city: "Mexico City", country: "Mexico"),
+            ]
+        ),
+        MultiAddressUser(
+            firstName: "Sara",
+            lastName: "King",
+            addresses: [
+                Address(city: "London", country: "United Kingdom"),
+                Address(city: "Bangkok", country: "Thailand"),
+            ]
+        ),
+    ]
+    
+    let results = await Fuzzy().search(for: "Thailand", in: users)
     
     #expect(results.first?.item.lastName == "King")
 }
