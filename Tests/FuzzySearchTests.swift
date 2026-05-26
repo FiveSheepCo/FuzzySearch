@@ -51,6 +51,25 @@ private struct MultiAddressUser: Searchable, Sendable, Equatable {
     }
 }
 
+private struct ManualComponent: Searchable, Sendable, Equatable {
+    let title: String
+    
+    var searchDescriptor: SearchDescriptor {
+        SearchDescriptor(title)
+    }
+}
+
+private struct ManualEntry: Searchable, Sendable, Equatable {
+    let title: String
+    let components: [ManualComponent]
+    
+    var searchDescriptor: SearchDescriptor {
+        SearchDescriptor()
+            .add(title)
+            .add(components, weight: 0.75)
+    }
+}
+
 @Test func singleSearchReturnsWeightedScore() async throws {
     let user = User(firstName: "Sarah", lastName: "Connor", address: "Los Angeles")
     
@@ -140,6 +159,23 @@ private struct MultiAddressUser: Searchable, Sendable, Equatable {
     let results = await Fuzzy().search(for: "Thailand", in: users)
     
     #expect(results.first?.item.lastName == "King")
+}
+
+@Test func searchCanMatchWeightedArraysWhoseElementsUseConvenienceDescriptors() async throws {
+    let entries = [
+        ManualEntry(title: "Getting started", components: [
+            ManualComponent(title: "Installation"),
+            ManualComponent(title: "Configuration"),
+        ]),
+        ManualEntry(title: "Travel tools", components: [
+            ManualComponent(title: "Thailand TDAC"),
+            ManualComponent(title: "Ninety day reporting"),
+        ]),
+    ]
+    
+    let results = await Fuzzy().search(for: "TDAC", in: entries)
+    
+    #expect(results.first?.item.title == "Travel tools")
 }
 
 @Test func searchToleratesTyposAndDiacritics() async throws {
