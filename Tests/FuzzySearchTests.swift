@@ -1,0 +1,105 @@
+import Testing
+@testable import FuzzySearch
+
+private struct User: Searchable, Sendable, Equatable {
+    let firstName: String
+    let lastName: String
+    let address: String
+    
+    var searchDescriptor: SearchDescriptor {
+        SearchDescriptor()
+            .add(firstName)
+            .add(lastName)
+            .add(address, weight: 0.5)
+    }
+}
+
+@Test func singleSearchReturnsWeightedScore() async throws {
+    let user = User(firstName: "Sarah", lastName: "Connor", address: "Los Angeles")
+    
+    let result = await Fuzzy().search(for: "Sarah", in: user)
+    
+    #expect(result?.item == user)
+    #expect((result?.score ?? 0) > 0.3)
+}
+
+@Test func collectionSearchRanksMostRelevantItemsFirst() async throws {
+    let users = [
+        User(firstName: "Sam", lastName: "Carter", address: "Sarah Street"),
+        User(firstName: "Sarah", lastName: "Connor", address: "Los Angeles"),
+        User(firstName: "Zoe", lastName: "Salazar", address: "Bangkok"),
+    ]
+    
+    let results = await Fuzzy().search(for: "Sarah", in: users)
+    
+    #expect(results.map(\.item.firstName).prefix(2) == ["Sarah", "Sam"])
+    #expect(results[0].score > results[1].score)
+}
+
+@Test func collectionSearchCanMatchAcrossProperties() async throws {
+    let users = [
+        User(firstName: "Sarah", lastName: "Connor", address: "Los Angeles"),
+        User(firstName: "Sara", lastName: "King", address: "London"),
+    ]
+    
+    let results = await Fuzzy().search(for: "Sarah Connor", in: users)
+    
+    #expect(results.first?.item.lastName == "Connor")
+    #expect((results.first?.score ?? 0) > 0.9)
+}
+
+@Test func searchToleratesTyposAndDiacritics() async throws {
+    let users = [
+        User(firstName: "Søren", lastName: "Kierkegaard", address: "Copenhagen"),
+        User(firstName: "Sara", lastName: "King", address: "London"),
+    ]
+    
+    let typoResults = await Fuzzy().search(for: "Saren", in: users)
+    let diacriticResult = await Fuzzy().search(for: "Soren", in: users)
+    
+    #expect(typoResults.first?.item.firstName == "Søren")
+    #expect(diacriticResult.first?.item.firstName == "Søren")
+}
+
+@Test func searchSupportsLimitAndMinimumScore() async throws {
+    let users = [
+        User(firstName: "Sarah", lastName: "Connor", address: "Los Angeles"),
+        User(firstName: "Sara", lastName: "King", address: "London"),
+        User(firstName: "Michael", lastName: "Biehn", address: "Chicago"),
+    ]
+    
+    let limitedResults = await Fuzzy().search(for: "Sara", in: users, limit: 1)
+    let strictResults = await Fuzzy().search(for: "Sara", in: users, minimumScore: 0.95)
+    
+    #expect(limitedResults.count == 1)
+    #expect(strictResults.allSatisfy { $0.score >= 0.95 })
+}
+
+@Test func customAlgorithmCanBeInjected() async throws {
+    struct ConstantAlgorithm: SearchAlgorithm {
+        let value: Double
+        
+        func score(query: String, descriptor: SearchDescriptor) -> Double {
+            value
+        }
+    }
+    
+    let user = User(firstName: "Sarah", lastName: "Connor", address: "Los Angeles")
+    
+    let result = await Fuzzy(algorithm: ConstantAlgorithm(value: 0.42))
+        .search(for: "anything", in: user, minimumScore: 0)
+    
+    #expect(result?.score == 0.42)
+}
+
+@Test func searchIndexActorSearchesStoredItems() async throws {
+    let index = SearchIndex(items: [
+        User(firstName: "Sarah", lastName: "Connor", address: "Los Angeles"),
+        User(firstName: "Kyle", lastName: "Reese", address: "Los Angeles"),
+    ])
+    
+    await index.append(User(firstName: "John", lastName: "Connor", address: "Mexico"))
+    let results = await index.search(for: "John", limit: 1)
+    
+    #expect(results.first?.item.firstName == "John")
+}
