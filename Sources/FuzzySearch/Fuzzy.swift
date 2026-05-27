@@ -1,9 +1,9 @@
 import Foundation
 
-public struct Fuzzy: Sendable {
-    private let algorithm: any SearchAlgorithm
+public struct Fuzzy<Algorithm>: Sendable where Algorithm: SearchAlgorithm {
+    private let algorithm: Algorithm
     
-    public init(algorithm: any SearchAlgorithm = DefaultFuzzySearchAlgorithm()) {
+    public init(algorithm: Algorithm) {
         self.algorithm = algorithm
     }
     
@@ -57,8 +57,8 @@ public struct Fuzzy: Sendable {
         guard !string.isEmpty else { return [] }
         guard !collection.isEmpty else { return [] }
         
-        let preparedQuery = (algorithm as? any QueryPreparingSearchAlgorithm)?.prepare(query: string)
-        if preparedQuery?.isEmpty == true { return [] }
+        let preparedQuery = algorithm.prepare(query: string)
+        guard algorithm.shouldSearch(preparedQuery: preparedQuery) else { return [] }
         
         if collection.count < 256 {
             return rankedResults(
@@ -90,18 +90,7 @@ public struct Fuzzy: Sendable {
                 group.addTask {
                     chunk.enumerated().compactMap { offset, item in
                         let itemDescriptor = descriptor(item)
-                        let evaluation: SearchEvaluation
-                        if let preparedQuery, let preparingAlgorithm = algorithm as? any QueryPreparingSearchEvaluatingAlgorithm {
-                            evaluation = preparingAlgorithm.evaluate(preparedQuery: preparedQuery, descriptor: itemDescriptor)
-                        } else if let evaluatingAlgorithm = algorithm as? any SearchEvaluatingAlgorithm {
-                            evaluation = evaluatingAlgorithm.evaluate(query: string, descriptor: itemDescriptor)
-                        } else if let preparedQuery, let preparingAlgorithm = algorithm as? any QueryPreparingSearchAlgorithm {
-                            evaluation = SearchEvaluation(
-                                score: preparingAlgorithm.score(preparedQuery: preparedQuery, descriptor: itemDescriptor)
-                            )
-                        } else {
-                            evaluation = SearchEvaluation(score: algorithm.score(query: string, descriptor: itemDescriptor))
-                        }
+                        let evaluation = algorithm.evaluate(preparedQuery: preparedQuery, descriptor: itemDescriptor)
                         guard evaluation.score >= minimumScore else { return nil }
                         return SearchResult(
                             item: item,
@@ -128,20 +117,11 @@ public struct Fuzzy: Sendable {
     private func evaluate(
         _ descriptor: SearchDescriptor,
         query: String,
-        preparedQuery: PreparedSearchQuery?
+        preparedQuery: Algorithm.PreparedQuery?
     ) -> SearchEvaluation {
-        if let preparingAlgorithm = algorithm as? any QueryPreparingSearchEvaluatingAlgorithm {
-            let preparedQuery = preparedQuery ?? preparingAlgorithm.prepare(query: query)
-            return preparingAlgorithm.evaluate(preparedQuery: preparedQuery, descriptor: descriptor)
-        }
-        if let evaluatingAlgorithm = algorithm as? any SearchEvaluatingAlgorithm {
-            return evaluatingAlgorithm.evaluate(query: query, descriptor: descriptor)
-        }
-        if let preparingAlgorithm = algorithm as? any QueryPreparingSearchAlgorithm {
-            let preparedQuery = preparedQuery ?? preparingAlgorithm.prepare(query: query)
-            return SearchEvaluation(score: preparingAlgorithm.score(preparedQuery: preparedQuery, descriptor: descriptor))
-        }
-        return SearchEvaluation(score: algorithm.score(query: query, descriptor: descriptor))
+        let preparedQuery = preparedQuery ?? algorithm.prepare(query: query)
+        guard algorithm.shouldSearch(preparedQuery: preparedQuery) else { return SearchEvaluation(score: 0) }
+        return algorithm.evaluate(preparedQuery: preparedQuery, descriptor: descriptor)
     }
     
     private func rankedResults<Item, S>(
@@ -155,5 +135,11 @@ public struct Fuzzy: Sendable {
         
         guard let limit else { return sortedResults }
         return Array(sortedResults.prefix(max(0, limit)))
+    }
+}
+
+public extension Fuzzy where Algorithm == DefaultFuzzySearchAlgorithm {
+    init() {
+        self.init(algorithm: DefaultFuzzySearchAlgorithm())
     }
 }

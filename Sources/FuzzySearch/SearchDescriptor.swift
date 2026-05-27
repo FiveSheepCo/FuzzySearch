@@ -1,13 +1,15 @@
 import Foundation
 
 public struct SearchDescriptor: Sendable {
-    internal var properties: [SearchableProperty] = []
+    public let fields: [SearchField]
     
-    internal init(properties: [SearchableProperty]) {
-        self.properties = properties
+    public init(fields: [SearchField]) {
+        self.fields = fields
     }
     
-    public init() {}
+    public init() {
+        self.fields = []
+    }
     
     public init<V>(_ value: V) where V: SearchableValue {
         self = SearchDescriptor().add(value)
@@ -27,38 +29,38 @@ public struct SearchDescriptor: Sendable {
     
     @discardableResult
     public func add<V>(_ value: V, weight: Double = 1) -> SearchDescriptor where V: SearchableValue {
-        let property = SearchableProperty(value: AnySearchableValue(value), weight: weight)
-        var properties = properties
-        properties.append(property)
-        return SearchDescriptor(properties: properties)
+        let field = SearchField(value.searchableString, weight: weight)
+        var fields = fields
+        fields.append(field)
+        return SearchDescriptor(fields: fields)
     }
     
     @discardableResult
     public func add<S>(_ values: S, weight: Double = 1) -> SearchDescriptor where S: Sequence, S.Element: SearchableValue {
-        var properties = properties
+        var fields = fields
         for value in values {
-            properties.append(SearchableProperty(value: AnySearchableValue(value), weight: weight))
+            fields.append(SearchField(value.searchableString, weight: weight))
         }
-        return SearchDescriptor(properties: properties)
+        return SearchDescriptor(fields: fields)
     }
     
     @discardableResult
     public func add<S>(_ searchable: S, weight: Double = 1) -> SearchDescriptor where S: Searchable {
-        var properties = properties
-        properties.append(contentsOf: searchable.searchDescriptor.properties.map { property in
-            SearchableProperty(value: property.value, weight: property.weight * weight)
+        var fields = fields
+        fields.append(contentsOf: searchable.searchDescriptor.fields.map { field in
+            SearchField(field.value, weight: field.weight * weight)
         })
-        return SearchDescriptor(properties: properties)
+        return SearchDescriptor(fields: fields)
     }
     
     @discardableResult
     public func add<S>(_ searchables: S, weight: Double = 1) -> SearchDescriptor where S: Sequence, S.Element: Searchable {
-        var properties = properties
+        var fields = fields
         for searchable in searchables {
-            properties.append(contentsOf: searchable.searchDescriptor.properties.map { property in
-                SearchableProperty(value: property.value, weight: property.weight * weight)
+            fields.append(contentsOf: searchable.searchDescriptor.fields.map { field in
+                SearchField(field.value, weight: field.weight * weight)
             })
         }
-        return SearchDescriptor(properties: properties)
+        return SearchDescriptor(fields: fields)
     }
 }

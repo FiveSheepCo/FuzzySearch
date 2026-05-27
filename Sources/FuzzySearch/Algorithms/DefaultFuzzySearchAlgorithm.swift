@@ -1,34 +1,47 @@
 import Foundation
 
-public struct DefaultFuzzySearchAlgorithm: QueryPreparingSearchEvaluatingAlgorithm {
+public struct DefaultFuzzySearchPreparedQuery: Sendable {
+    public let rawValue: String
+    internal let preparedText: PreparedText
+    
+    public var isEmpty: Bool {
+        preparedText.text.isEmpty
+    }
+    
+    public init(_ rawValue: String) {
+        self.rawValue = rawValue
+        self.preparedText = PreparedText(rawValue)
+    }
+    
+    internal init(rawValue: String, preparedText: PreparedText) {
+        self.rawValue = rawValue
+        self.preparedText = preparedText
+    }
+}
+
+public struct DefaultFuzzySearchAlgorithm: SearchAlgorithm {
+    public typealias PreparedQuery = DefaultFuzzySearchPreparedQuery
+    
     public init() {}
     
-    public func score(query: String, descriptor: SearchDescriptor) -> Double {
-        score(preparedQuery: prepare(query: query), descriptor: descriptor)
+    public func prepare(query: String) -> DefaultFuzzySearchPreparedQuery {
+        DefaultFuzzySearchPreparedQuery(rawValue: query, preparedText: PreparedText(query))
     }
     
-    public func prepare(query: String) -> PreparedSearchQuery {
-        PreparedSearchQuery(rawValue: query, preparedText: PreparedText(query))
+    public func shouldSearch(preparedQuery: DefaultFuzzySearchPreparedQuery) -> Bool {
+        !preparedQuery.isEmpty
     }
     
-    public func score(preparedQuery query: PreparedSearchQuery, descriptor: SearchDescriptor) -> Double {
-        evaluate(preparedQuery: query, descriptor: descriptor).score
-    }
-    
-    public func evaluate(query: String, descriptor: SearchDescriptor) -> SearchEvaluation {
-        evaluate(preparedQuery: prepare(query: query), descriptor: descriptor)
-    }
-    
-    public func evaluate(preparedQuery query: PreparedSearchQuery, descriptor: SearchDescriptor) -> SearchEvaluation {
+    public func evaluate(preparedQuery query: DefaultFuzzySearchPreparedQuery, descriptor: SearchDescriptor) -> SearchEvaluation {
         let preparedQuery = query.preparedText
         guard !preparedQuery.text.isEmpty else { return SearchEvaluation(score: 0) }
         
-        let properties = descriptor.properties.filter { $0.weight > 0 }
-        guard !properties.isEmpty else { return SearchEvaluation(score: 0) }
+        let fields = descriptor.fields.filter { $0.weight > 0 }
+        guard !fields.isEmpty else { return SearchEvaluation(score: 0) }
         
-        let maximumWeight = properties.map(\.weight).max() ?? 1
-        let combinedText = properties
-            .map { $0.value.searchableString }
+        let maximumWeight = fields.map(\.weight).max() ?? 1
+        let combinedText = fields
+            .map(\.value)
             .joined(separator: " ")
         
         var bestPropertyScore = 0.0
@@ -36,17 +49,16 @@ public struct DefaultFuzzySearchAlgorithm: QueryPreparingSearchEvaluatingAlgorit
         var totalWeight = 0.0
         var matches: [SearchMatch] = []
         
-        for property in properties {
-            let weight = property.weight
-            let propertyText = property.value.searchableString
-            let propertyEvaluation = evaluate(preparedQuery, against: PreparedText(propertyText))
-            let propertyScore = propertyEvaluation.score
+        for field in fields {
+            let weight = field.weight
+            let fieldEvaluation = evaluate(preparedQuery, against: PreparedText(field.value))
+            let fieldScore = fieldEvaluation.score
             let relativeWeight = maximumWeight > 0 ? weight / maximumWeight : 1
             
-            bestPropertyScore = max(bestPropertyScore, propertyScore * relativeWeight)
-            weightedScore += propertyScore * weight
+            bestPropertyScore = max(bestPropertyScore, fieldScore * relativeWeight)
+            weightedScore += fieldScore * weight
             totalWeight += weight
-            matches.append(contentsOf: propertyEvaluation.matches)
+            matches.append(contentsOf: fieldEvaluation.matches)
         }
         
         guard totalWeight > 0 else { return SearchEvaluation(score: 0) }

@@ -1,12 +1,12 @@
 import Foundation
 
-public actor SearchIndex<Item> where Item: Searchable & Sendable {
+public actor SearchIndex<Item, Algorithm> where Item: Searchable & Sendable, Algorithm: SearchAlgorithm {
     private var items: [Item]
-    private let fuzzy: Fuzzy
+    private let fuzzy: Fuzzy<Algorithm>
     
     public init(
         items: [Item] = [],
-        algorithm: any SearchAlgorithm = DefaultFuzzySearchAlgorithm()
+        algorithm: Algorithm
     ) {
         self.items = items
         self.fuzzy = Fuzzy(algorithm: algorithm)
@@ -34,5 +34,11 @@ public actor SearchIndex<Item> where Item: Searchable & Sendable {
     
     public func removeAll(keepingCapacity keepCapacity: Bool = false) {
         items.removeAll(keepingCapacity: keepCapacity)
+    }
+}
+
+public extension SearchIndex where Algorithm == DefaultFuzzySearchAlgorithm {
+    init(items: [Item] = []) {
+        self.init(items: items, algorithm: DefaultFuzzySearchAlgorithm())
     }
 }

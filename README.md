@@ -133,6 +133,19 @@ var searchDescriptor: SearchDescriptor {
 
 Weights are relative. A field with `weight: 0.5` contributes less strongly than fields with the default `weight: 1.0`.
 
+`SearchDescriptor` exposes its searchable text as public `fields`, so custom algorithms can inspect the exact strings and weights produced by a model:
+
+```swift
+public struct SearchDescriptor: Sendable {
+    public let fields: [SearchField]
+}
+
+public struct SearchField: Sendable, Equatable {
+    public let value: String
+    public let weight: Double
+}
+```
+
 Descriptors can also include nested `Searchable` values, including arrays of `Searchable` values. Nested field weights are preserved and multiplied by the outer weight.
 
 ```swift
@@ -196,39 +209,55 @@ This is useful when multiple tasks need to read or update a shared search corpus
 
 ## Custom Algorithms
 
-`FuzzySearch` supports custom search algorithms by providing any `SearchAlgorithm`.
+`FuzzySearch` supports custom search algorithms by providing a `SearchAlgorithm`.
+There is one algorithm protocol. Algorithms can prepare a query once, decide whether a prepared query should run, and return both a score and optional match ranges through `SearchEvaluation`.
 
 ```swift
 struct MyAlgorithm: SearchAlgorithm {
-    func score(query: String, descriptor: SearchDescriptor) -> Double {
-        // Return a normalized score from 0.0 to 1.0.
-        0
+    func evaluate(preparedQuery query: String, descriptor: SearchDescriptor) -> SearchEvaluation {
+        let score = descriptor.fields.contains { field in
+            field.value.localizedCaseInsensitiveContains(query)
+        } ? 1.0 : 0.0
+        
+        return SearchEvaluation(score: score)
     }
 }
 
 let fuzzy = Fuzzy(algorithm: MyAlgorithm())
 ```
 
-Algorithms that can preprocess the query once per collection search can conform to `QueryPreparingSearchAlgorithm`:
+Algorithms that do not declare a custom prepared-query type use `String` as their prepared query and get `prepare(query:)` for free.
+Algorithms that need preprocessing declare their own `PreparedQuery` type:
 
 ```swift
-struct MyPreparedAlgorithm: QueryPreparingSearchAlgorithm {
-    func prepare(query: String) -> PreparedSearchQuery {
-        PreparedSearchQuery(query)
+struct TokenQuery: Sendable {
+    let tokens: [String]
+}
+
+struct TokenAlgorithm: SearchAlgorithm {
+    func prepare(query: String) -> TokenQuery {
+        TokenQuery(tokens: query.lowercased().split(separator: " ").map(String.init))
     }
 
-    func score(query: String, descriptor: SearchDescriptor) -> Double {
-        score(preparedQuery: prepare(query: query), descriptor: descriptor)
+    func shouldSearch(preparedQuery: TokenQuery) -> Bool {
+        !preparedQuery.tokens.isEmpty
     }
 
-    func score(preparedQuery: PreparedSearchQuery, descriptor: SearchDescriptor) -> Double {
-        // Score using the prepared query.
-        0
+    func evaluate(preparedQuery query: TokenQuery, descriptor: SearchDescriptor) -> SearchEvaluation {
+        let score = descriptor.fields.reduce(0.0) { total, field in
+            let fieldText = field.value.lowercased()
+            let matches = query.tokens.filter { fieldText.contains($0) }.count
+            return total + (Double(matches) * field.weight)
+        }
+        
+        return SearchEvaluation(score: min(1, score))
     }
 }
 ```
 
-Custom algorithms can return match ranges by conforming to `SearchEvaluatingAlgorithm` or `QueryPreparingSearchEvaluatingAlgorithm` and returning `SearchEvaluation(score:matches:)`.
+Custom algorithms can return match ranges by including `SearchMatch` values in `SearchEvaluation(score:matches:)`.
+The default algorithm uses `DefaultFuzzySearchPreparedQuery`; custom algorithms do not need to use or construct that type.
+Use `AnySearchAlgorithm` when you need to store or pass an algorithm whose concrete type is chosen at runtime.
 
 ## Concurrency
 

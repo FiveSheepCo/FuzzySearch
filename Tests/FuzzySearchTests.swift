@@ -1,5 +1,5 @@
 import Testing
-@testable import FuzzySearch
+import FuzzySearch
 
 private struct User: Searchable, Sendable, Equatable {
     let firstName: String
@@ -310,8 +310,8 @@ private struct ManualEntry: Searchable, Sendable, Equatable {
     struct ConstantAlgorithm: SearchAlgorithm {
         let value: Double
         
-        func score(query: String, descriptor: SearchDescriptor) -> Double {
-            value
+        func evaluate(preparedQuery query: String, descriptor: SearchDescriptor) -> SearchEvaluation {
+            SearchEvaluation(score: descriptor.fields.isEmpty ? 0 : value)
         }
     }
     
@@ -321,6 +321,58 @@ private struct ManualEntry: Searchable, Sendable, Equatable {
         .search(for: "anything", in: user, minimumScore: 0)
     
     #expect(result?.score == 0.42)
+}
+
+@Test func customAlgorithmCanPrepareQueryAndReadDescriptorFields() async throws {
+    struct TokenQuery: Sendable {
+        let tokens: [String]
+    }
+    
+    struct TokenOverlapAlgorithm: SearchAlgorithm {
+        func prepare(query: String) -> TokenQuery {
+            TokenQuery(tokens: query.lowercased().split(separator: " ").map(String.init))
+        }
+        
+        func shouldSearch(preparedQuery: TokenQuery) -> Bool {
+            !preparedQuery.tokens.isEmpty
+        }
+        
+        func evaluate(preparedQuery query: TokenQuery, descriptor: SearchDescriptor) -> SearchEvaluation {
+            let weightedMatches = descriptor.fields.reduce(0.0) { total, field in
+                let fieldText = field.value.lowercased()
+                let matchedTokenCount = query.tokens.count { fieldText.contains($0) }
+                return total + (Double(matchedTokenCount) * field.weight)
+            }
+            return SearchEvaluation(score: min(1, weightedMatches))
+        }
+    }
+    
+    let users = [
+        User(firstName: "Sarah", lastName: "Connor", address: "Los Angeles"),
+        User(firstName: "Kyle", lastName: "Reese", address: "Los Angeles"),
+    ]
+    
+    let results = await Fuzzy(algorithm: TokenOverlapAlgorithm())
+        .search(for: "connor", in: users, minimumScore: 0)
+    
+    #expect(results.first?.item.lastName == "Connor")
+    #expect(results.first?.score == 1)
+}
+
+@Test func typeErasedSearchAlgorithmCanBeInjected() async throws {
+    struct PrefixAlgorithm: SearchAlgorithm {
+        func evaluate(preparedQuery query: String, descriptor: SearchDescriptor) -> SearchEvaluation {
+            let score = descriptor.fields.contains { $0.value.hasPrefix(query) } ? 1.0 : 0.0
+            return SearchEvaluation(score: score)
+        }
+    }
+    
+    let algorithm = AnySearchAlgorithm(PrefixAlgorithm())
+    let values = ["Bangkok", "London"]
+    
+    let results = await Fuzzy(algorithm: algorithm).search(for: "Ban", in: values)
+    
+    #expect(results.first?.item == "Bangkok")
 }
 
 @Test func searchIndexActorSearchesStoredItems() async throws {
