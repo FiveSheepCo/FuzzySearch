@@ -3,6 +3,10 @@ import Foundation
 public struct SearchDescriptor: Sendable {
     internal var properties: [SearchableProperty] = []
     
+    internal init(properties: [SearchableProperty]) {
+        self.properties = properties
+    }
+    
     public init() {}
     
     public init<V>(_ value: V) where V: SearchableValue {
@@ -19,10 +23,6 @@ public struct SearchDescriptor: Sendable {
     
     public init<S>(_ values: S) where S: Sequence, S.Element: SearchableValue {
         self = SearchDescriptor().add(values)
-    }
-    
-    internal init(properties: [SearchableProperty]) {
-        self.properties = properties
     }
     
     @discardableResult
