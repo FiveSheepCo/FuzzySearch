@@ -224,6 +224,51 @@ private struct ManualEntry: Searchable, Sendable, Equatable {
     #expect(results.first?.index == 2)
 }
 
+@Test func collectionSearchIncludesMatchRangesForSearchableValues() async throws {
+    let values = ["Bangkok", "London", "Los Angeles", "Mexico City"]
+    
+    let results = await Fuzzy().search(for: "Angeles", in: values)
+    
+    #expect(results.first?.matches.first?.value == "Los Angeles")
+    #expect(results.first?.matches.first?.range == 4...10)
+    #expect(results.first?.matches.first?.text == "Angeles")
+}
+
+@Test func singleSearchIncludesMatchRangesForSearchableProperties() async throws {
+    let user = User(firstName: "Sarah", lastName: "Connor", address: "Los Angeles")
+    
+    let result = await Fuzzy().search(for: "Angeles", in: user)
+    
+    #expect(result?.matches.first?.value == "Los Angeles")
+    #expect(result?.matches.first?.range == 4...10)
+    #expect(result?.matches.first?.text == "Angeles")
+}
+
+@Test func matchRangesUseOriginalStringOffsetsAfterNormalization() async throws {
+    let users = [
+        User(firstName: "Søren", lastName: "Kierkegaard", address: "Copenhagen"),
+        User(firstName: "Sara", lastName: "King", address: "London"),
+    ]
+    
+    let results = await Fuzzy().search(for: "Soren", in: users)
+    
+    #expect(results.first?.matches.first?.value == "Søren")
+    #expect(results.first?.matches.first?.range == 0...4)
+    #expect(results.first?.matches.first?.text == "Søren")
+}
+
+@Test func multiTokenSearchIncludesMatchRangesFromMultipleProperties() async throws {
+    let users = [
+        User(firstName: "Sarah", lastName: "Connor", address: "Los Angeles"),
+        User(firstName: "Sara", lastName: "King", address: "London"),
+    ]
+    
+    let results = await Fuzzy().search(for: "Sarah Connor", in: users)
+    
+    #expect(results.first?.matches.map(\.text).contains("Sarah") == true)
+    #expect(results.first?.matches.map(\.text).contains("Connor") == true)
+}
+
 @Test func searchSupportsLimitAndMinimumScore() async throws {
     let users = [
         User(firstName: "Sarah", lastName: "Connor", address: "Los Angeles"),

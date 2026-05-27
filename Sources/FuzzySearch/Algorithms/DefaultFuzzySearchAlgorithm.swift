@@ -1,6 +1,6 @@
 import Foundation
 
-public struct DefaultFuzzySearchAlgorithm: QueryPreparingSearchAlgorithm {
+public struct DefaultFuzzySearchAlgorithm: QueryPreparingSearchEvaluatingAlgorithm {
     public init() {}
     
     public func score(query: String, descriptor: SearchDescriptor) -> Double {
@@ -12,11 +12,19 @@ public struct DefaultFuzzySearchAlgorithm: QueryPreparingSearchAlgorithm {
     }
     
     public func score(preparedQuery query: PreparedSearchQuery, descriptor: SearchDescriptor) -> Double {
+        evaluate(preparedQuery: query, descriptor: descriptor).score
+    }
+    
+    public func evaluate(query: String, descriptor: SearchDescriptor) -> SearchEvaluation {
+        evaluate(preparedQuery: prepare(query: query), descriptor: descriptor)
+    }
+    
+    public func evaluate(preparedQuery query: PreparedSearchQuery, descriptor: SearchDescriptor) -> SearchEvaluation {
         let preparedQuery = query.preparedText
-        guard !preparedQuery.text.isEmpty else { return 0 }
+        guard !preparedQuery.text.isEmpty else { return SearchEvaluation(score: 0) }
         
         let properties = descriptor.properties.filter { $0.weight > 0 }
-        guard !properties.isEmpty else { return 0 }
+        guard !properties.isEmpty else { return SearchEvaluation(score: 0) }
         
         let maximumWeight = properties.map(\.weight).max() ?? 1
         let combinedText = properties
@@ -26,79 +34,124 @@ public struct DefaultFuzzySearchAlgorithm: QueryPreparingSearchAlgorithm {
         var bestPropertyScore = 0.0
         var weightedScore = 0.0
         var totalWeight = 0.0
+        var matches: [SearchMatch] = []
         
         for property in properties {
             let weight = property.weight
-            let propertyScore = score(preparedQuery, against: PreparedText(property.value.searchableString))
+            let propertyText = property.value.searchableString
+            let propertyEvaluation = evaluate(preparedQuery, against: PreparedText(propertyText))
+            let propertyScore = propertyEvaluation.score
             let relativeWeight = maximumWeight > 0 ? weight / maximumWeight : 1
             
             bestPropertyScore = max(bestPropertyScore, propertyScore * relativeWeight)
             weightedScore += propertyScore * weight
             totalWeight += weight
+            matches.append(contentsOf: propertyEvaluation.matches)
         }
         
-        guard totalWeight > 0 else { return 0 }
+        guard totalWeight > 0 else { return SearchEvaluation(score: 0) }
         
         let averagePropertyScore = weightedScore / totalWeight
         let combinedScore = preparedQuery.tokens.count > 1
             ? score(preparedQuery, against: PreparedText(combinedText))
             : 0
         
-        return min(1, max(0, bestPropertyScore, averagePropertyScore, combinedScore))
+        let score = min(1, max(0, bestPropertyScore, averagePropertyScore, combinedScore))
+        return SearchEvaluation(score: score, matches: matches.deduplicated())
     }
     
     private func score(_ query: PreparedText, against candidate: PreparedText) -> Double {
-        guard !candidate.text.isEmpty else { return 0 }
-        if query.text == candidate.text { return 1 }
+        evaluate(query, against: candidate).score
+    }
+    
+    private func evaluate(_ query: PreparedText, against candidate: PreparedText) -> SearchEvaluation {
+        guard !candidate.text.isEmpty else { return SearchEvaluation(score: 0) }
+        let queryText = query.text[query.text.startIndex..<query.text.endIndex]
+        let candidateText = candidate.text[candidate.text.startIndex..<candidate.text.endIndex]
+        if query.text == candidate.text {
+            return SearchEvaluation(
+                score: 1,
+                matches: candidate.match(for: candidateText.startIndex..<candidateText.endIndex).map { [$0] } ?? []
+            )
+        }
         
-        let fullTextScore = scoreTerm(query.text, against: candidate.text)
-        let tokenScore = averageBestTokenScore(query.tokens, against: candidate.tokens)
-        let acronymScore = candidate.acronym.isEmpty ? 0 : scoreTerm(query.text, against: candidate.acronym) * 0.92
+        let fullTextEvaluation = evaluateTerm(queryText, against: candidateText)
+        let tokenEvaluation = averageBestTokenEvaluation(query.tokens, against: candidate.tokens, in: candidate)
+        let acronymScore = candidate.acronym.isEmpty ? 0 : scoreTerm(queryText, against: candidate.acronym[...]) * 0.92
         
-        return max(fullTextScore, tokenScore, acronymScore)
+        let score = max(fullTextEvaluation.score, tokenEvaluation.score, acronymScore)
+        if tokenEvaluation.score >= fullTextEvaluation.score {
+            return SearchEvaluation(score: score, matches: tokenEvaluation.matches)
+        }
+        return SearchEvaluation(
+            score: score,
+            matches: fullTextEvaluation.range.flatMap { candidate.match(for: $0) }.map { [$0] } ?? []
+        )
     }
     
     private func averageBestTokenScore(_ queryTokens: [Substring], against candidateTokens: [Substring]) -> Double {
-        guard !queryTokens.isEmpty, !candidateTokens.isEmpty else { return 0 }
-        
-        var total = 0.0
-        for queryToken in queryTokens {
-            let best = candidateTokens.lazy
-                .map { scoreTerm(queryToken, against: $0) }
-                .max() ?? 0
-            total += best
-        }
-        
-        return total / Double(queryTokens.count)
+        averageBestTokenEvaluation(queryTokens, against: candidateTokens, in: nil).score
     }
     
-    private func scoreTerm<Q, C>(_ query: Q, against candidate: C) -> Double where Q: StringProtocol, C: StringProtocol {
-        guard !query.isEmpty, !candidate.isEmpty else { return 0 }
-        if query == candidate { return 1 }
+    private func averageBestTokenEvaluation(
+        _ queryTokens: [Substring],
+        against candidateTokens: [Substring],
+        in candidate: PreparedText?
+    ) -> SearchEvaluation {
+        guard !queryTokens.isEmpty, !candidateTokens.isEmpty else { return SearchEvaluation(score: 0) }
+        
+        var total = 0.0
+        var matches: [SearchMatch] = []
+        for queryToken in queryTokens {
+            let best = candidateTokens.lazy
+                .map { token -> TermEvaluation in
+                    evaluateTerm(queryToken, against: token)
+                }
+                .max { $0.score < $1.score } ?? TermEvaluation(score: 0)
+            total += best.score
+            if let candidate, let range = best.range, let match = candidate.match(for: range) {
+                matches.append(match)
+            }
+        }
+        
+        return SearchEvaluation(score: total / Double(queryTokens.count), matches: matches.deduplicated())
+    }
+    
+    private func scoreTerm(_ query: Substring, against candidate: Substring) -> Double {
+        evaluateTerm(query, against: candidate).score
+    }
+    
+    private func evaluateTerm(_ query: Substring, against candidate: Substring) -> TermEvaluation {
+        guard !query.isEmpty, !candidate.isEmpty else { return TermEvaluation(score: 0) }
+        if query == candidate { return TermEvaluation(score: 1, range: candidate.startIndex..<candidate.endIndex) }
         
         if candidate.hasPrefix(query) {
             let lengthRatio = Double(query.count) / Double(candidate.count)
-            return 0.88 + (0.10 * lengthRatio)
+            let endIndex = candidate.index(candidate.startIndex, offsetBy: query.count)
+            return TermEvaluation(score: 0.88 + (0.10 * lengthRatio), range: candidate.startIndex..<endIndex)
         }
         
         if let range = candidate.range(of: query) {
             let offset = candidate.distance(from: candidate.startIndex, to: range.lowerBound)
             let lengthRatio = Double(query.count) / Double(candidate.count)
             let positionPenalty = min(0.12, Double(offset) * 0.015)
-            return max(0.72, 0.86 + (0.08 * lengthRatio) - positionPenalty)
+            return TermEvaluation(score: max(0.72, 0.86 + (0.08 * lengthRatio) - positionPenalty), range: range)
         }
         
-        let subsequenceScore = orderedSubsequenceScore(query, candidate)
-        if subsequenceScore >= 0.64 {
-            return subsequenceScore
+        let subsequenceEvaluation = orderedSubsequenceEvaluation(query, candidate)
+        if subsequenceEvaluation.score >= 0.64 {
+            return subsequenceEvaluation
         }
         
         if let queryFirst = query.first, candidate.first != queryFirst, !candidate.contains(queryFirst) {
-            return subsequenceScore
+            return subsequenceEvaluation
         }
         
         let editSimilarity = normalizedEditSimilarity(query, candidate)
-        return max(subsequenceScore, editSimilarity)
+        if editSimilarity > subsequenceEvaluation.score {
+            return TermEvaluation(score: editSimilarity, range: candidate.startIndex..<candidate.endIndex)
+        }
+        return subsequenceEvaluation
     }
     
     private func normalizedEditSimilarity<Q, C>(_ query: Q, _ candidate: C) -> Double where Q: StringProtocol, C: StringProtocol {
@@ -117,19 +170,25 @@ public struct DefaultFuzzySearchAlgorithm: QueryPreparingSearchAlgorithm {
         return max(0, ratio * 0.84)
     }
     
-    private func orderedSubsequenceScore<Q, C>(_ query: Q, _ candidate: C) -> Double where Q: StringProtocol, C: StringProtocol {
+    private func orderedSubsequenceScore(_ query: Substring, _ candidate: Substring) -> Double {
+        orderedSubsequenceEvaluation(query, candidate).score
+    }
+    
+    private func orderedSubsequenceEvaluation(_ query: Substring, _ candidate: Substring) -> TermEvaluation {
         var searchStart = candidate.startIndex
-        var previousMatch: C.Index?
+        var previousMatch: String.Index?
         var gaps = 0
         var firstOffset = 0
+        var firstMatch: String.Index?
         
         for queryCharacter in query {
             guard let match = candidate[searchStart...].firstIndex(of: queryCharacter) else {
-                return 0
+                return TermEvaluation(score: 0)
             }
             
             if previousMatch == nil {
                 firstOffset = candidate.distance(from: candidate.startIndex, to: match)
+                firstMatch = match
             } else if let previousMatch {
                 gaps += candidate.distance(from: previousMatch, to: match) - 1
             }
@@ -141,7 +200,12 @@ public struct DefaultFuzzySearchAlgorithm: QueryPreparingSearchAlgorithm {
         let coverage = Double(query.count) / Double(candidate.count)
         let gapPenalty = min(0.24, Double(gaps) * 0.025)
         let startPenalty = min(0.12, Double(firstOffset) * 0.015)
-        return max(0, 0.62 + (coverage * 0.18) - gapPenalty - startPenalty)
+        let score = max(0, 0.62 + (coverage * 0.18) - gapPenalty - startPenalty)
+        let range = firstMatch.flatMap { firstMatch -> Range<String.Index>? in
+            guard let previousMatch else { return nil }
+            return firstMatch..<candidate.index(after: previousMatch)
+        }
+        return TermEvaluation(score: score, range: range)
     }
     
     private func boundedLevenshteinDistance<L, R>(
@@ -181,45 +245,106 @@ public struct DefaultFuzzySearchAlgorithm: QueryPreparingSearchAlgorithm {
     }
 }
 
+private struct TermEvaluation {
+    let score: Double
+    let range: Range<String.Index>?
+    
+    init(score: Double, range: Range<String.Index>? = nil) {
+        self.score = score
+        self.range = range
+    }
+}
+
 internal struct PreparedText: Sendable {
+    let source: String
     let text: String
     let tokens: [Substring]
     let acronym: String
+    let sourceRanges: [ClosedRange<Int>]
     
     init(_ rawValue: String) {
-        text = PreparedText.normalizedText(rawValue)
+        source = rawValue
+        let normalized = PreparedText.normalizedText(rawValue)
+        text = normalized.text
+        sourceRanges = normalized.sourceRanges
         tokens = text.split(separator: " ")
         acronym = String(tokens.compactMap(\.first))
     }
     
-    private static func normalizedText(_ rawValue: String) -> String {
-        if rawValue.utf8.allSatisfy(\.isASCII) {
+    func match(for normalizedRange: Range<String.Index>) -> SearchMatch? {
+        let lowerOffset = text.distance(from: text.startIndex, to: normalizedRange.lowerBound)
+        let upperOffset = text.distance(from: text.startIndex, to: normalizedRange.upperBound) - 1
+        guard lowerOffset >= 0,
+              upperOffset >= lowerOffset,
+              lowerOffset < sourceRanges.count,
+              upperOffset < sourceRanges.count else {
+            return nil
+        }
+        
+        let sourceRange = sourceRanges[lowerOffset].lowerBound...sourceRanges[upperOffset].upperBound
+        return SearchMatch(value: source, range: sourceRange, text: source.substring(in: sourceRange))
+    }
+    
+    private static func normalizedText(_ rawValue: String) -> (text: String, sourceRanges: [ClosedRange<Int>]) {
+        if rawValue.utf8.allSatisfy({ $0 < 128 }) {
             return asciiNormalizedText(rawValue)
         }
         
-        return rawValue
-            .folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: .current)
-            .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
+        var text = ""
+        var sourceRanges: [ClosedRange<Int>] = []
+        var previousWasSeparator = true
+        
+        for (offset, character) in rawValue.enumerated() {
+            let folded = String(character)
+                .folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: .current)
+            let normalizedScalars = folded.unicodeScalars.filter {
+                CharacterSet.alphanumerics.contains($0)
+            }
+            
+            if normalizedScalars.isEmpty {
+                if !previousWasSeparator {
+                    text.append(" ")
+                    sourceRanges.append(offset...offset)
+                    previousWasSeparator = true
+                }
+                continue
+            }
+            
+            for scalar in normalizedScalars {
+                text.unicodeScalars.append(scalar)
+                sourceRanges.append(offset...offset)
+            }
+            previousWasSeparator = false
+        }
+        
+        if text.last == " " {
+            text.removeLast()
+            sourceRanges.removeLast()
+        }
+        
+        return (text, sourceRanges)
     }
     
-    private static func asciiNormalizedText(_ rawValue: String) -> String {
+    private static func asciiNormalizedText(_ rawValue: String) -> (text: String, sourceRanges: [ClosedRange<Int>]) {
         var bytes: [UInt8] = []
         bytes.reserveCapacity(rawValue.utf8.count)
+        var sourceRanges: [ClosedRange<Int>] = []
         
         var previousWasSeparator = true
-        for byte in rawValue.utf8 {
+        for (offset, byte) in rawValue.utf8.enumerated() {
             switch byte {
             case 48...57, 97...122:
                 bytes.append(byte)
+                sourceRanges.append(offset...offset)
                 previousWasSeparator = false
             case 65...90:
                 bytes.append(byte + 32)
+                sourceRanges.append(offset...offset)
                 previousWasSeparator = false
             default:
                 if !previousWasSeparator {
                     bytes.append(32)
+                    sourceRanges.append(offset...offset)
                     previousWasSeparator = true
                 }
             }
@@ -227,14 +352,29 @@ internal struct PreparedText: Sendable {
         
         if bytes.last == 32 {
             bytes.removeLast()
+            sourceRanges.removeLast()
         }
         
-        return String(decoding: bytes, as: UTF8.self)
+        return (String(decoding: bytes, as: UTF8.self), sourceRanges)
     }
 }
 
-private extension UInt8 {
-    var isASCII: Bool {
-        self < 128
+private extension Array where Element == SearchMatch {
+    func deduplicated() -> [SearchMatch] {
+        var matches: [SearchMatch] = []
+        for match in self where !matches.contains(where: {
+            $0.value == match.value && $0.range == match.range
+        }) {
+            matches.append(match)
+        }
+        return matches
+    }
+}
+
+private extension String {
+    func substring(in range: ClosedRange<Int>) -> String {
+        let lowerBound = index(startIndex, offsetBy: range.lowerBound)
+        let upperBound = index(startIndex, offsetBy: range.upperBound)
+        return String(self[lowerBound...upperBound])
     }
 }

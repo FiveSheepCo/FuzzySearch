@@ -12,9 +12,9 @@ public struct Fuzzy: Sendable {
         in searchable: S,
         minimumScore: Double = 0.2
     ) async -> SearchResult<S>? where S: Searchable & Sendable {
-        let score = score(searchable.searchDescriptor, query: string, preparedQuery: nil)
-        guard score >= minimumScore else { return nil }
-        return SearchResult(item: searchable, score: score)
+        let evaluation = evaluate(searchable.searchDescriptor, query: string, preparedQuery: nil)
+        guard evaluation.score >= minimumScore else { return nil }
+        return SearchResult(item: searchable, score: evaluation.score, matches: evaluation.matches)
     }
     
     public func search<C>(
@@ -63,9 +63,14 @@ public struct Fuzzy: Sendable {
         if collection.count < 256 {
             return rankedResults(
                 collection.enumerated().lazy.compactMap { offset, item in
-                    let score = score(descriptor(item), query: string, preparedQuery: preparedQuery)
-                    guard score >= minimumScore else { return nil }
-                    return SearchResult(item: item, score: score, index: offset)
+                    let evaluation = evaluate(descriptor(item), query: string, preparedQuery: preparedQuery)
+                    guard evaluation.score >= minimumScore else { return nil }
+                    return SearchResult(
+                        item: item,
+                        score: evaluation.score,
+                        index: offset,
+                        matches: evaluation.matches
+                    )
                 },
                 limit: limit
             )
@@ -85,14 +90,25 @@ public struct Fuzzy: Sendable {
                 group.addTask {
                     chunk.enumerated().compactMap { offset, item in
                         let itemDescriptor = descriptor(item)
-                        let score: Double
-                        if let preparedQuery, let preparingAlgorithm = algorithm as? any QueryPreparingSearchAlgorithm {
-                            score = preparingAlgorithm.score(preparedQuery: preparedQuery, descriptor: itemDescriptor)
+                        let evaluation: SearchEvaluation
+                        if let preparedQuery, let preparingAlgorithm = algorithm as? any QueryPreparingSearchEvaluatingAlgorithm {
+                            evaluation = preparingAlgorithm.evaluate(preparedQuery: preparedQuery, descriptor: itemDescriptor)
+                        } else if let evaluatingAlgorithm = algorithm as? any SearchEvaluatingAlgorithm {
+                            evaluation = evaluatingAlgorithm.evaluate(query: string, descriptor: itemDescriptor)
+                        } else if let preparedQuery, let preparingAlgorithm = algorithm as? any QueryPreparingSearchAlgorithm {
+                            evaluation = SearchEvaluation(
+                                score: preparingAlgorithm.score(preparedQuery: preparedQuery, descriptor: itemDescriptor)
+                            )
                         } else {
-                            score = algorithm.score(query: string, descriptor: itemDescriptor)
+                            evaluation = SearchEvaluation(score: algorithm.score(query: string, descriptor: itemDescriptor))
                         }
-                        guard score >= minimumScore else { return nil }
-                        return SearchResult(item: item, score: score, index: chunkLowerBound + offset)
+                        guard evaluation.score >= minimumScore else { return nil }
+                        return SearchResult(
+                            item: item,
+                            score: evaluation.score,
+                            index: chunkLowerBound + offset,
+                            matches: evaluation.matches
+                        )
                     }
                 }
                 
@@ -109,15 +125,23 @@ public struct Fuzzy: Sendable {
         return rankedResults(resultBatches.flatMap(\.self), limit: limit)
     }
     
-    private func score(
+    private func evaluate(
         _ descriptor: SearchDescriptor,
         query: String,
         preparedQuery: PreparedSearchQuery?
-    ) -> Double {
-        if let preparedQuery, let preparingAlgorithm = algorithm as? any QueryPreparingSearchAlgorithm {
-            return preparingAlgorithm.score(preparedQuery: preparedQuery, descriptor: descriptor)
+    ) -> SearchEvaluation {
+        if let preparingAlgorithm = algorithm as? any QueryPreparingSearchEvaluatingAlgorithm {
+            let preparedQuery = preparedQuery ?? preparingAlgorithm.prepare(query: query)
+            return preparingAlgorithm.evaluate(preparedQuery: preparedQuery, descriptor: descriptor)
         }
-        return algorithm.score(query: query, descriptor: descriptor)
+        if let evaluatingAlgorithm = algorithm as? any SearchEvaluatingAlgorithm {
+            return evaluatingAlgorithm.evaluate(query: query, descriptor: descriptor)
+        }
+        if let preparingAlgorithm = algorithm as? any QueryPreparingSearchAlgorithm {
+            let preparedQuery = preparedQuery ?? preparingAlgorithm.prepare(query: query)
+            return SearchEvaluation(score: preparingAlgorithm.score(preparedQuery: preparedQuery, descriptor: descriptor))
+        }
+        return SearchEvaluation(score: algorithm.score(query: query, descriptor: descriptor))
     }
     
     private func rankedResults<Item, S>(

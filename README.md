@@ -83,11 +83,29 @@ public struct SearchResult<Item>: Sendable where Item: Sendable {
     public let item: Item
     public let score: Double
     public let index: Int?
+    public let matches: [SearchMatch]
+}
+
+public struct SearchMatch: Sendable {
+    public let value: String
+    public let range: ClosedRange<Int>
+    public let text: String
 }
 ```
 
 Scores are normalized from `0.0` to `1.0`, where higher is better.
 For collection searches, `index` is the source collection offset for the matched item. Single-item searches return `nil`.
+The default algorithm also returns `matches` for the searched fields that matched. Each match includes the original searchable string, a character-offset range in that original string, and the matched text.
+
+```swift
+let cities = ["Bangkok", "London", "Los Angeles", "Mexico City"]
+let results = await Fuzzy().search(for: "Angeles", in: cities)
+
+let match = results[0].matches[0]
+print(match.value) // "Los Angeles"
+print(match.range) // 4...10
+print(match.text)  // "Angeles"
+```
 
 You can limit result count or filter weak matches:
 
@@ -209,6 +227,8 @@ struct MyPreparedAlgorithm: QueryPreparingSearchAlgorithm {
     }
 }
 ```
+
+Custom algorithms can return match ranges by conforming to `SearchEvaluatingAlgorithm` or `QueryPreparingSearchEvaluatingAlgorithm` and returning `SearchEvaluation(score:matches:)`.
 
 ## Concurrency
 
