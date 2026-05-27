@@ -61,6 +61,13 @@ for result in results {
 }
 ```
 
+Search a collection of values directly:
+
+```swift
+let cities = ["Bangkok", "London", "Los Angeles", "Mexico City"]
+let cityResults = await Fuzzy().search(for: "Angeles", in: cities)
+```
+
 Search a single value:
 
 ```swift
@@ -108,7 +115,7 @@ var searchDescriptor: SearchDescriptor {
 
 Weights are relative. A field with `weight: 0.5` contributes less strongly than fields with the default `weight: 1.0`.
 
-Descriptors can also include nested `Searchable` values, including arrays of searchable values. Nested field weights are preserved and multiplied by the outer weight.
+Descriptors can also include nested `Searchable` values, including arrays of `Searchable` values. Nested field weights are preserved and multiplied by the outer weight.
 
 ```swift
 struct Address: Searchable {
@@ -132,6 +139,21 @@ struct User: Searchable {
             .add(firstName)
             .add(lastName)
             .add(addresses, weight: 0.5)
+    }
+}
+```
+
+Descriptors can include arrays of `SearchableValue` values too. For example, `[String]` works because `String` conforms to `SearchableValue`.
+
+```swift
+struct Article: Searchable {
+    let title: String
+    let tags: [String]
+
+    var searchDescriptor: SearchDescriptor {
+        SearchDescriptor()
+            .add(title)
+            .add(tags, weight: 0.5)
     }
 }
 ```
@@ -203,6 +225,8 @@ public func search<C>(
 ) async -> [SearchResult<C.Element>]
 where C: Collection & Sendable, C.Element: Searchable & Sendable
 ```
+
+Collections whose elements conform to `SearchableValue`, such as `[String]`, can be searched with the same API.
 
 ## Running Tests
 

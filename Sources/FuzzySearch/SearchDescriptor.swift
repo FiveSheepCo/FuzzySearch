@@ -17,6 +17,10 @@ public struct SearchDescriptor: Sendable {
         self = SearchDescriptor().add(searchables)
     }
     
+    public init<S>(_ values: S) where S: Sequence, S.Element: SearchableValue {
+        self = SearchDescriptor().add(values)
+    }
+    
     internal init(properties: [SearchableProperty]) {
         self.properties = properties
     }
@@ -26,6 +30,15 @@ public struct SearchDescriptor: Sendable {
         let property = SearchableProperty(value: AnySearchableValue(value), weight: weight)
         var properties = properties
         properties.append(property)
+        return SearchDescriptor(properties: properties)
+    }
+    
+    @discardableResult
+    public func add<S>(_ values: S, weight: Double = 1) -> SearchDescriptor where S: Sequence, S.Element: SearchableValue {
+        var properties = properties
+        for value in values {
+            properties.append(SearchableProperty(value: AnySearchableValue(value), weight: weight))
+        }
         return SearchDescriptor(properties: properties)
     }
     

@@ -23,6 +23,37 @@ public struct Fuzzy: Sendable {
         limit: Int? = nil,
         minimumScore: Double = 0.2
     ) async -> [SearchResult<C.Element>] where C: Collection & Sendable, C.Element: Searchable & Sendable {
+        await search(
+            for: string,
+            in: collection,
+            limit: limit,
+            minimumScore: minimumScore,
+            descriptor: \.searchDescriptor
+        )
+    }
+    
+    public func search<C>(
+        for string: String,
+        in collection: C,
+        limit: Int? = nil,
+        minimumScore: Double = 0.2
+    ) async -> [SearchResult<C.Element>] where C: Collection & Sendable, C.Element: SearchableValue & Sendable {
+        await search(
+            for: string,
+            in: collection,
+            limit: limit,
+            minimumScore: minimumScore,
+            descriptor: { SearchDescriptor($0) }
+        )
+    }
+    
+    private func search<C>(
+        for string: String,
+        in collection: C,
+        limit: Int?,
+        minimumScore: Double,
+        descriptor: @escaping @Sendable (C.Element) -> SearchDescriptor
+    ) async -> [SearchResult<C.Element>] where C: Collection & Sendable, C.Element: Sendable {
         guard !string.isEmpty else { return [] }
         guard !collection.isEmpty else { return [] }
         
@@ -32,7 +63,7 @@ public struct Fuzzy: Sendable {
         if collection.count < 256 {
             return rankedResults(
                 collection.enumerated().lazy.compactMap { offset, item in
-                    let score = score(item.searchDescriptor, query: string, preparedQuery: preparedQuery)
+                    let score = score(descriptor(item), query: string, preparedQuery: preparedQuery)
                     guard score >= minimumScore else { return nil }
                     return SearchResult(item: item, score: score, index: offset)
                 },
@@ -53,11 +84,12 @@ public struct Fuzzy: Sendable {
                 
                 group.addTask {
                     chunk.enumerated().compactMap { offset, item in
+                        let itemDescriptor = descriptor(item)
                         let score: Double
                         if let preparedQuery, let preparingAlgorithm = algorithm as? any QueryPreparingSearchAlgorithm {
-                            score = preparingAlgorithm.score(preparedQuery: preparedQuery, descriptor: item.searchDescriptor)
+                            score = preparingAlgorithm.score(preparedQuery: preparedQuery, descriptor: itemDescriptor)
                         } else {
-                            score = algorithm.score(query: string, descriptor: item.searchDescriptor)
+                            score = algorithm.score(query: string, descriptor: itemDescriptor)
                         }
                         guard score >= minimumScore else { return nil }
                         return SearchResult(item: item, score: score, index: chunkLowerBound + offset)

@@ -51,6 +51,19 @@ private struct MultiAddressUser: Searchable, Sendable, Equatable {
     }
 }
 
+private struct TaggedUser: Searchable, Sendable, Equatable {
+    let firstName: String
+    let lastName: String
+    let tags: [String]
+    
+    var searchDescriptor: SearchDescriptor {
+        SearchDescriptor()
+            .add(firstName)
+            .add(lastName)
+            .add(tags, weight: 0.5)
+    }
+}
+
 private struct ManualComponent: Searchable, Sendable, Equatable {
     let title: String
     
@@ -161,6 +174,17 @@ private struct ManualEntry: Searchable, Sendable, Equatable {
     #expect(results.first?.item.lastName == "King")
 }
 
+@Test func searchCanMatchArraysOfSearchableValues() async throws {
+    let users = [
+        TaggedUser(firstName: "Sarah", lastName: "Connor", tags: ["resistance", "los-angeles"]),
+        TaggedUser(firstName: "Sara", lastName: "King", tags: ["travel", "thailand"]),
+    ]
+    
+    let results = await Fuzzy().search(for: "Thailand", in: users)
+    
+    #expect(results.first?.item.lastName == "King")
+}
+
 @Test func searchCanMatchWeightedArraysWhoseElementsUseConvenienceDescriptors() async throws {
     let entries = [
         ManualEntry(title: "Getting started", components: [
@@ -189,6 +213,15 @@ private struct ManualEntry: Searchable, Sendable, Equatable {
     
     #expect(typoResults.first?.item.firstName == "Søren")
     #expect(diacriticResult.first?.item.firstName == "Søren")
+}
+
+@Test func collectionSearchSupportsSearchableValues() async throws {
+    let values = ["Bangkok", "London", "Los Angeles", "Mexico City"]
+    
+    let results = await Fuzzy().search(for: "Angeles", in: values)
+    
+    #expect(results.first?.item == "Los Angeles")
+    #expect(results.first?.index == 2)
 }
 
 @Test func searchSupportsLimitAndMinimumScore() async throws {
