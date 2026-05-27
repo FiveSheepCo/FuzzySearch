@@ -140,18 +140,18 @@ public struct DefaultFuzzySearchAlgorithm: QueryPreparingSearchEvaluatingAlgorit
         
         let subsequenceEvaluation = orderedSubsequenceEvaluation(query, candidate)
         if subsequenceEvaluation.score >= 0.64 {
-            return subsequenceEvaluation
+            return TermEvaluation(score: subsequenceEvaluation.score)
         }
         
         if let queryFirst = query.first, candidate.first != queryFirst, !candidate.contains(queryFirst) {
-            return subsequenceEvaluation
+            return TermEvaluation(score: subsequenceEvaluation.score)
         }
         
         let editSimilarity = normalizedEditSimilarity(query, candidate)
         if editSimilarity > subsequenceEvaluation.score {
-            return TermEvaluation(score: editSimilarity, range: candidate.startIndex..<candidate.endIndex)
+            return TermEvaluation(score: editSimilarity)
         }
-        return subsequenceEvaluation
+        return TermEvaluation(score: subsequenceEvaluation.score)
     }
     
     private func normalizedEditSimilarity<Q, C>(_ query: Q, _ candidate: C) -> Double where Q: StringProtocol, C: StringProtocol {

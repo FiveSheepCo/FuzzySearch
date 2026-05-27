@@ -250,7 +250,7 @@ private struct ManualEntry: Searchable, Sendable, Equatable {
         User(firstName: "Sara", lastName: "King", address: "London"),
     ]
     
-    let results = await Fuzzy().search(for: "Soren", in: users)
+    let results = await Fuzzy().search(for: "søren", in: users)
     
     #expect(results.first?.matches.first?.value == "Søren")
     #expect(results.first?.matches.first?.range == 0...4)
@@ -267,6 +267,29 @@ private struct ManualEntry: Searchable, Sendable, Equatable {
     
     #expect(results.first?.matches.map(\.text).contains("Sarah") == true)
     #expect(results.first?.matches.map(\.text).contains("Connor") == true)
+}
+
+@Test func matchesDoNotReportSubsequenceFallbackRanges() async throws {
+    let values = ["https://youtu.be/uN_Vb4ZnD4Q?si=redirect"]
+    
+    let results = await Fuzzy().search(for: "Visa", in: values, minimumScore: 0)
+    
+    #expect(results.first?.matches.isEmpty == true)
+}
+
+@Test func literalSubstringMatchesAreReportedWhenFallbacksAlsoExist() async throws {
+    let values = [
+        "https://youtu.be/uN_Vb4ZnD4Q?si=redirect",
+        "ThaiVisaTracker helps travelers",
+    ]
+    
+    let results = await Fuzzy().search(for: "Visa", in: values, minimumScore: 0)
+    let thaiVisaMatch = results
+        .flatMap(\.matches)
+        .first { $0.value == "ThaiVisaTracker helps travelers" }
+    
+    #expect(thaiVisaMatch?.range == 4...7)
+    #expect(thaiVisaMatch?.text == "Visa")
 }
 
 @Test func searchSupportsLimitAndMinimumScore() async throws {
