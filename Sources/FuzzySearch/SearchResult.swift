@@ -29,4 +29,8 @@ public struct SearchResult<Item>: Sendable where Item: Sendable {
         self.index = index
         self.matches = matches
     }
+    
+    public var ranges: [CountableClosedRange<Int>] {
+        matches.map(\.range)
+    }
 }
