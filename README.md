@@ -9,7 +9,7 @@ The default algorithm is tuned for practical fuzzy lookup across names, addresse
 Add FuzzySearch to your Swift package dependencies:
 
 ```swift
-.package(url: "https://github.com/your-org/FuzzySearch.git", branch: "main")
+.package(url: "https://github.com/your-org/FuzzySearch.git", .upToNextMajor(from: "0.1.0"))
 ```
 
 Then add it to a target:
